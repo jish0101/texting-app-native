@@ -1,21 +1,18 @@
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
-  Keyboard,
-  KeyboardAvoidingView,
-  Platform,
+  Alert,
   SafeAreaView,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
-  TouchableWithoutFeedback,
   View,
 } from "react-native";
-import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { TouchableOpacity } from "react-native";
 import { FontAwesome, Ionicons } from "@expo/vector-icons";
 import { StatusBar } from "expo-status-bar";
-import { auth, fetchMessagesForChat } from "../firebase";
+import { auth, fetchMessagesForChat, firestore } from "../firebase";
 import firebase from "../firebase";
+import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
 
 const ChatScreen = ({ navigation, route }) => {
   const [input, setInput] = useState("");
@@ -41,12 +38,16 @@ const ChatScreen = ({ navigation, route }) => {
           <TouchableOpacity>
             <FontAwesome name="phone" size={24} color="white" />
           </TouchableOpacity>
+          <TouchableOpacity onPress={handleDeleteChat}>
+            <FontAwesome name="trash" size={24} color="white" />
+          </TouchableOpacity>
         </View>
       ),
     });
   }, [navigation]);
 
-  const sendMessage = () => {
+  const sendMessage = async () => {
+    const MAX_MESSAGES_PER_CHAT = 30;
     const chatID = route.params.chatID;
     const messageText = input.trim();
     if (!messageText) return;
@@ -55,27 +56,100 @@ const ChatScreen = ({ navigation, route }) => {
     if (currentUser) {
       const { displayName, email, photoURL } = currentUser;
 
-      firebase
+      // Get the reference to the messages collection for the chat
+      const messagesRef = firebase
         .firestore()
         .collection("chats")
         .doc(chatID)
-        .collection("messages")
-        .add({
+        .collection("messages");
+
+      try {
+        // Check the number of messages in the chat
+        const snapshot = await messagesRef.orderBy("timestamp", "asc").get();
+        const messagesCount = snapshot.size;
+
+        // If the number of messages exceeds the limit, delete the oldest messages
+        if (messagesCount >= MAX_MESSAGES_PER_CHAT) {
+          const oldestMessages = snapshot.docs.slice(
+            0,
+            messagesCount - MAX_MESSAGES_PER_CHAT
+          );
+          const deletePromises = oldestMessages.map((doc) => doc.ref.delete());
+          await Promise.all(deletePromises);
+        }
+
+        // Add the new message
+        await messagesRef.add({
           timestamp: firebase.firestore.FieldValue.serverTimestamp(),
           message: messageText,
           displayName: displayName,
           email: email,
           photoURL: photoURL,
-        })
-        .then((docRef) => {
-          console.log("Message added with ID:", docRef.id);
-          setInput("");
-        })
-        .catch((error) => {
-          console.error("Error adding message:", error);
         });
+
+        setInput("");
+      } catch (error) {
+        console.error("Error sending message:", error);
+        Alert.alert("Error", "Failed to send message. Please try again.");
+      }
     } else {
       console.log("User not logged in.");
+    }
+  };
+
+  const handleDeleteChat = () => {
+    Alert.alert("Delete Chat", "Are you sure you want to delete this chat?", [
+      {
+        text: "Cancel",
+        style: "cancel",
+      },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: deleteChat,
+      },
+    ]);
+  };
+
+  useEffect(() => {
+    const chatID = route.params.chatID;
+    const chatRef = firestore.collection("chats").doc(chatID);
+
+    const unsubscribe = chatRef.onSnapshot((snapshot) => {
+      if (!snapshot.exists) {
+        // Chat was deleted, show an alert and then redirect all users back to the home screen
+        Alert.alert(
+          "Chat Deleted",
+          "This chat has been deleted..",
+          [
+            {
+              text: "OK",
+              onPress: () => {
+                navigation.navigate("Home");
+              },
+            },
+          ]
+        );
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [navigation, route.params.chatID]);
+
+  const deleteChat = async () => {
+    const chatID = route.params.chatID;
+
+    try {
+      await firestore.collection("chats").doc(chatID).delete();
+      navigation.navigate("Home");
+    } catch (error) {
+      console.error("Error deleting chat:", error);
+      Alert.alert(
+        "Delete Failed",
+        "Failed to delete the chat. Please try again."
+      );
     }
   };
 
@@ -98,63 +172,56 @@ const ChatScreen = ({ navigation, route }) => {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar style="light" />
-      <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
+
+      <KeyboardAwareScrollView
+        contentContainerStyle={{ paddingTop: 15 }}
         style={styles.container}
-        keyboardVerticalOffset={90}
+        ref={scrollViewRef}
+        onLayout={(event) =>
+          setScrollViewHeight(event.nativeEvent.layout.height)
+        }
+        onContentSizeChange={(width, height) => setContentHeight(height)}
       >
-        <TouchableWithoutFeedback onPress={() => Keyboard.dismiss()}>
-          <>
-            <ScrollView
-              contentContainerStyle={{ paddingTop: 15 }}
-              ref={scrollViewRef}
-              onLayout={(event) =>
-                setScrollViewHeight(event.nativeEvent.layout.height)
-              }
-              onContentSizeChange={(width, height) => setContentHeight(height)}
-              style={styles.container}
-            >
-              {messages &&
-                messages.map(({ id, data }) =>
-                  data?.email === auth.currentUser.email ? (
-                    <View key={id} style={styles.reciever}>
-                      <Text style={styles.recieverText}>{data.message}</Text>
-                      <FontAwesome
-                        name="user-circle-o"
-                        size={20}
-                        style={styles.recieverIcon}
-                        color="grey"
-                      />
-                    </View>
-                  ) : (
-                    <View key={id} style={styles.sender}>
-                      <Text style={styles.senderText}>{data.message}</Text>
-                      <FontAwesome
-                        name="user-circle-o"
-                        size={20}
-                        style={styles.senderIcon}
-                        color="#2868E6"
-                      />
-                      <Text style={styles.senderName}>{data.displayName}</Text>
-                    </View>
-                  )
-                )}
-            </ScrollView>
-            <View style={styles.footer}>
-              <TextInput
-                value={input}
-                style={styles.textInput}
-                onChangeText={(text) => setInput(text)}
-                onSubmitEditing={sendMessage}
-                placeholder="Enter your message.."
-              />
-              <TouchableOpacity onPress={sendMessage} activeOpacity={0.5}>
-                <Ionicons name="send" size={24} color="#2868E6" />
-              </TouchableOpacity>
-            </View>
-          </>
-        </TouchableWithoutFeedback>
-      </KeyboardAvoidingView>
+        {messages &&
+          messages.map(({ id, data }) =>
+            data?.email === auth.currentUser.email ? (
+              <View key={id} style={styles.reciever}>
+                <Text style={styles.recieverText}>{data.message}</Text>
+                <FontAwesome
+                  name="user-circle-o"
+                  size={20}
+                  style={styles.recieverIcon}
+                  color="grey"
+                />
+              </View>
+            ) : (
+              <View key={id} style={styles.sender}>
+                <Text style={styles.senderText}>{data.message}</Text>
+                <FontAwesome
+                  name="user-circle-o"
+                  size={20}
+                  style={styles.senderIcon}
+                  color="#2868E6"
+                />
+                <Text style={styles.senderName}>{data.displayName}</Text>
+              </View>
+            )
+          )}
+      </KeyboardAwareScrollView>
+
+      {/* Input section */}
+      <View style={styles.footer}>
+        <TextInput
+          value={input}
+          style={styles.textInput}
+          onChangeText={(text) => setInput(text)}
+          onSubmitEditing={sendMessage}
+          placeholder="Enter your message.."
+        />
+        <TouchableOpacity onPress={sendMessage} activeOpacity={0.5}>
+          <Ionicons name="send" size={24} color="#2868E6" />
+        </TouchableOpacity>
+      </View>
     </SafeAreaView>
   );
 };
@@ -244,18 +311,3 @@ const styles = StyleSheet.create({
     bottom: -22,
   },
 });
-
-{
-  /* <Avatar
-  containerStyle={{
-    position: "absolute",
-    bottom: -15,
-    right: -5,
-  }}
-  bottom={-15}
-  right={-5}
-  size={30}
-  rounded
-  source={{ uri: data?.photoURL }}
-/> */
-}

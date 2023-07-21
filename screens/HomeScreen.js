@@ -27,11 +27,14 @@ const HomeScreen = ({ navigation }) => {
     return unsubscribe;
   }, [navigation]);
 
-  useFocusEffect(
-    React.useCallback(() => {
-      handleFetchChats();
-    }, [user])
-  );
+  useEffect(() => {
+    const unsubscribe = fetchChats(setChats);
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
 
   const logoutHandler = async () => {
     navigation.navigate("UserProfile");
@@ -66,15 +69,6 @@ const HomeScreen = ({ navigation }) => {
       ),
     });
   }, []);
-
-  const handleFetchChats = async () => {
-    try {
-      const chats = await fetchChats();
-      setChats(chats);
-    } catch (error) {
-      console.error("Failed to fetch chats:", error);
-    }
-  };
 
   const enterChat = (chatID, chatName) => {
     navigation.navigate("Chat", {

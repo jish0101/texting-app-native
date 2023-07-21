@@ -79,30 +79,34 @@ const addChat = async (chatName) => {
   }
 };
 
-const fetchChats = async () => {
+const fetchChats = (onChatsUpdate) => {
   try {
     const user = auth.currentUser;
     if (user) {
       const chatsRef = firestore.collection("chats");
-      const querySnapshot = await chatsRef.get();
 
-      const chats = [];
-      querySnapshot.forEach((doc) => {
-        const chat = doc.data();
-        const chatID = doc.id;
-        chats.push({ chatID, data: chat });
+      const unsubscribe = chatsRef.onSnapshot((querySnapshot) => {
+        const chats = [];
+        querySnapshot.forEach((doc) => {
+          const chat = doc.data();
+          const chatID = doc.id;
+          chats.push({ chatID, data: chat });
+        });
+
+        onChatsUpdate(chats);
       });
 
-      return chats;
+      return unsubscribe;
     } else {
       console.log("User not authenticated");
-      return [];
+      return () => {};
     }
   } catch (error) {
     console.error("Error fetching chats:", error);
     throw new Error("Failed to fetch chats");
   }
 };
+
 
 const fetchMessagesForChat = (chatID, onMessagesUpdate) => {
   try {
@@ -138,4 +142,4 @@ const fetchMessagesForChat = (chatID, onMessagesUpdate) => {
 
 
 export default firebase;
-export { auth, loginUser, createUser, logoutUser, addChat, fetchChats, fetchMessagesForChat };
+export { firestore, auth, loginUser, createUser, logoutUser, addChat, fetchChats, fetchMessagesForChat };
