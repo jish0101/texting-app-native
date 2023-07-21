@@ -3,12 +3,7 @@ import "firebase/compat/auth";
 import "firebase/compat/firestore";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyDuDs9h2RTORdlBqvu8hLToBV_iKM3I28M",
-  authDomain: "signal-clone-96920.firebaseapp.com",
-  projectId: "signal-clone-96920",
-  storageBucket: "signal-clone-96920.appspot.com",
-  messagingSenderId: "437108787604",
-  appId: "1:437108787604:web:79d8d7a4c99236b51a2781",
+  // your keys here
 };
 
 // Initialize Firebase
